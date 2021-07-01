@@ -118,6 +118,10 @@
     <string name="sorting_order">Renditja e Renditjes</string>
 
     <!--Settings-->
+    <string name="settings_hide_app_title">Fshih aplikacionin Magisk</string>
+    <string name="settings_hide_app_summary">Instaloni një aplikacion proxy me ID të paketës së rastësishme dhe etiketë të personalizuar të aplikacionit</string>
+    <string name="settings_restore_app_title">Rivendosni aplikacionin Magisk</string>
+    <string name="settings_restore_app_summary">Zh-fshehni aplikacionin dhe rikthejeni atë përsëri në APK-në origjinale</string>
     <string name="settings_dark_mode_title">Modaliteti i temës</string>
     <string name="settings_dark_mode_message">Zgjidhni mënyrën e cila i përshtatet më mirë stilit tuaj!</string>
     <string name="settings_dark_mode_light">Gjithmonë e lehtë</string>
@@ -212,6 +216,13 @@
     <string name="setup_msg">Konfigurimi i mjedisit drejtues…</string>
     <string name="authenticate">Vërteto</string>
     <string name="unsupport_magisk_title">Versioni i pambështetur i Magisk</string>
+    <string name="unsupport_magisk_msg">Ky version i aplikacionit nuk mbështet versionin Magisk më të ulët se %1$s. \n\n Aplikimi do të sillet sikur nuk është instaluar asnjë Magisk, azhurnoni Magisk sa më shpejt të jetë e mundur.</string>
+    <string name="unsupport_general_title">Shteti Anormal</string>
+    <string name="unsupport_system_app_msg">Ekzekutimi i këtij aplikacioni si një aplikacion i sistemit nuk mbështetet. Ju lutemi ktheni aplikacionin në një aplikacion përdoruesi.</string>
+    <string name="unsupport_other_su_msg">Zbulohet një komandë \"su\" që nuk i përket Magisk. Ju lutemi hiqni su-në tjetër të pambështetur.</string>
+    <string name="unsupport_external_storage_msg">Magisk është instaluar në hapësirën ruajtëse të jashtme. Ju lutemi zhvendoseni aplikacionin në hapësirën e brendshme.</string>
+    <string name="unsupport_nonroot_stub_msg">Aplikacioni nuk mund të vazhdojë të punojë në gjendje të fshehur pasi rrënja ishte humbur. Ju lutemi rikthejeni atë përsëri në APK-në origjinale.</string>
+    <string name="unsupport_nonroot_stub_title">@string/settings_restore_app_title</string>
     <string name="external_rw_permission_denied">Jep leje për ruajtje për të mundësuar këtë funksionalitet</string>
     <string name="add_shortcut_title">Shto shkurtore në ekranin kryesor</string>
     <string name="app_not_found">Asnjë aplikacion nuk u gjet për të trajtuar këtë veprim</string>

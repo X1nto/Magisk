@@ -35,6 +35,7 @@
             style="@style/WidgetFoundation.Appbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            app:layout_behavior="com.topjohnwu.magisk.utils.HideTopViewOnScrollBehavior"
             app:fitsSystemWindowsInsets="top">
 
             <com.google.android.material.appbar.MaterialToolbar
@@ -45,12 +46,6 @@
                 app:layout_scrollFlags="noScroll"
                 tools:layout_marginTop="24dp"
                 tools:title="Home" />
-
-            <View
-                gone="@{android.os.Build.VERSION.SDK_INT >= 21}"
-                android:layout_width="match_parent"
-                android:layout_height="2dp"
-                android:background="?colorSurfaceVariant"/>
 
         </com.google.android.material.appbar.AppBarLayout>
 
@@ -76,6 +71,7 @@
             android:layout_marginBottom="@dimen/l1"
             android:fitsSystemWindows="false"
             app:layout_fitsSystemWindowsInsets="bottom"
+            app:layout_behavior="com.topjohnwu.magisk.utils.HideBottomViewOnScrollBehavior"
             tools:layout_marginBottom="64dp">
 
             <com.google.android.material.bottomnavigation.BottomNavigationView

@@ -3,35 +3,27 @@ package com.topjohnwu.magisk.core
 import android.os.Build
 import android.os.Process
 import com.topjohnwu.magisk.BuildConfig
-import java.io.File
 
 @Suppress("DEPRECATION")
 object Const {
 
-    val CPU_ABI: String
-    val CPU_ABI_32: String
+    val CPU_ABI: String get() = Build.SUPPORTED_ABIS[0]
 
-    init {
-        if (Build.VERSION.SDK_INT >= 21) {
-            CPU_ABI = Build.SUPPORTED_ABIS[0]
-            CPU_ABI_32 = Build.SUPPORTED_32_BIT_ABIS[0]
-        } else {
-            CPU_ABI = Build.CPU_ABI
-            CPU_ABI_32 = CPU_ABI
-        }
-    }
+    // Null if 32-bit only or 64-bit only
+    val CPU_ABI_32 =
+        if (Build.SUPPORTED_64_BIT_ABIS.isEmpty()) null
+        else Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
 
     // Paths
     lateinit var MAGISKTMP: String
-    lateinit var NATIVE_LIB_DIR: File
     val MAGISK_PATH get() = "$MAGISKTMP/modules"
     const val TMPDIR = "/dev/tmp"
     const val MAGISK_LOG = "/cache/magisk.log"
 
     // Versions
-    const val SNET_EXT_VER = 15
-    const val SNET_REVISION = "18ab78817087c337ae0edd1ecac38aec49217880"
-    const val BOOTCTL_REVISION = "18ab78817087c337ae0edd1ecac38aec49217880"
+    const val SNET_EXT_VER = 17
+    const val SNET_REVISION = "23.0"
+    const val BOOTCTL_REVISION = "22.0"
 
     // Misc
     val USER_ID = Process.myUid() / 100000
@@ -46,12 +38,7 @@ object Const {
     }
 
     object ID {
-        const val FETCH_ZIP = 2
-        const val SELECT_FILE = 3
-        const val MAX_ACTIVITY_RESULT = 10
-
         // notifications
-        const val MAGISK_UPDATE_NOTIFICATION_ID = 4
         const val APK_UPDATE_NOTIFICATION_ID = 5
         const val UPDATE_NOTIFICATION_CHANNEL = "update"
         const val PROGRESS_NOTIFICATION_CHANNEL = "progress"
@@ -67,7 +54,7 @@ object Const {
 
         const val GITHUB_RAW_URL = "https://raw.githubusercontent.com/"
         const val GITHUB_API_URL = "https://api.github.com/"
-        const val GITHUB_PAGE_URL = "https://topjohnwu.github.io/magisk_files/"
+        const val GITHUB_PAGE_URL = "https://topjohnwu.github.io/magisk-files/"
         const val JS_DELIVR_URL = "https://cdn.jsdelivr.net/gh/"
         const val OFFICIAL_REPO = "https://magisk-modules-repo.github.io/submission/modules.json"
     }

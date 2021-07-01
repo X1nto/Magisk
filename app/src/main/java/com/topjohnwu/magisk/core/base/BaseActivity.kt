@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
+import android.os.Bundle
 import android.widget.Toast
 import androidx.annotation.CallSuper
 import androidx.appcompat.app.AppCompatActivity
@@ -14,9 +15,9 @@ import androidx.collection.SparseArrayCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.topjohnwu.magisk.R
-import com.topjohnwu.magisk.core.Const
 import com.topjohnwu.magisk.core.utils.currentLocale
 import com.topjohnwu.magisk.core.wrap
+import com.topjohnwu.magisk.ktx.reflectField
 import com.topjohnwu.magisk.ktx.set
 import com.topjohnwu.magisk.utils.Utils
 import kotlin.random.Random
@@ -26,6 +27,13 @@ typealias ActivityResultCallback = BaseActivity.(Int, Intent?) -> Unit
 abstract class BaseActivity : AppCompatActivity() {
 
     private val resultCallbacks by lazy { SparseArrayCompat<ActivityResultCallback>() }
+    private val newRequestCode: Int get() {
+        var requestCode: Int
+        do {
+            requestCode = Random.nextInt(0, 1 shl 15)
+        } while (resultCallbacks.containsKey(requestCode))
+        return requestCode
+    }
 
     override fun applyOverrideConfiguration(config: Configuration?) {
         // Force applying our preferred local
@@ -35,6 +43,15 @@ abstract class BaseActivity : AppCompatActivity() {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base.wrap(true))
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Overwrite private members to avoid nasty "false" stack traces being logged
+        val delegate = delegate
+        val clz = delegate.javaClass
+        clz.reflectField("mActivityHandlesUiModeChecked").set(delegate, true)
+        clz.reflectField("mActivityHandlesUiMode").set(delegate, false)
+        super.onCreate(savedInstanceState)
     }
 
     fun withPermission(permission: String, builder: PermissionRequestBuilder.() -> Unit) {
@@ -49,10 +66,7 @@ abstract class BaseActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
             request.onSuccess()
         } else {
-            var requestCode: Int
-            do {
-                requestCode = Random.nextInt(Const.ID.MAX_ACTIVITY_RESULT + 1, 1 shl 15)
-            } while (resultCallbacks.containsKey(requestCode))
+            val requestCode = newRequestCode
             resultCallbacks[requestCode] = { result, _ ->
                 if (result > 0)
                     request.onSuccess()
@@ -69,6 +83,7 @@ abstract class BaseActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         var success = true
         for (res in grantResults) {
             if (res != PackageManager.PERMISSION_GRANTED) {
@@ -92,7 +107,8 @@ abstract class BaseActivity : AppCompatActivity() {
         }
     }
 
-    fun startActivityForResult(intent: Intent, requestCode: Int, callback: ActivityResultCallback) {
+    fun startActivityForResult(intent: Intent, callback: ActivityResultCallback) {
+        val requestCode = newRequestCode
         resultCallbacks[requestCode] = callback
         try {
             startActivityForResult(intent, requestCode)

@@ -8,7 +8,12 @@
 #define UID_ROOT   0
 #define UID_SHELL  2000
 
+#define DISALLOW_COPY_AND_MOVE(clazz) \
+clazz(const clazz &) = delete; \
+clazz(clazz &&) = delete;
+
 class mutex_guard {
+    DISALLOW_COPY_AND_MOVE(mutex_guard)
 public:
     explicit mutex_guard(pthread_mutex_t &m): mutex(&m) {
         pthread_mutex_lock(mutex);
@@ -26,6 +31,7 @@ private:
 
 template <class Func>
 class run_finally {
+    DISALLOW_COPY_AND_MOVE(run_finally)
 public:
     explicit run_finally(const Func &fn) : fn(fn) {}
     ~run_finally() { fn(); }
@@ -65,7 +71,7 @@ static inline bool str_contains(std::string_view s, std::string_view ss) {
     return s.find(ss) != std::string::npos;
 }
 static inline bool str_starts(std::string_view s, std::string_view ss) {
-    return s.rfind(ss, 0) == 0;
+    return s.size() >= ss.size() && s.compare(0, ss.size(), ss) == 0;
 }
 static inline bool str_ends(std::string_view s, std::string_view ss) {
     return s.size() >= ss.size() && s.compare(s.size() - ss.size(), std::string::npos, ss) == 0;

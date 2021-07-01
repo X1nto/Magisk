@@ -16,20 +16,18 @@ kapt {
     javacOptions {
         option("-Xmaxerrs", 1000)
     }
+    arguments {
+        arg("room.incremental", "true")
+    }
 }
 
 android {
     defaultConfig {
         applicationId = "com.topjohnwu.magisk"
         vectorDrawables.useSupportLibrary = true
-        multiDexEnabled = true
         versionName = Config.version
         versionCode = Config.versionCode
         ndk.abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-
-        javaCompileOptions.annotationProcessorOptions.arguments(
-            mapOf("room.incremental" to "true")
-        )
     }
 
     buildTypes {
@@ -75,42 +73,34 @@ val syncLibs by tasks.registering(Sync::class) {
             include("busybox", "magiskboot", "magiskinit", "magisk")
             rename { if (it == "magisk") "libmagisk32.so" else "lib$it.so" }
         }
-        from(rootProject.file("native/out/arm64-v8a")) {
-            include("magisk")
-            rename { if (it == "magisk") "libmagisk64.so" else "lib$it.so" }
-        }
     }
     into("x86") {
         from(rootProject.file("native/out/x86")) {
             include("busybox", "magiskboot", "magiskinit", "magisk")
             rename { if (it == "magisk") "libmagisk32.so" else "lib$it.so" }
         }
+    }
+    into("arm64-v8a") {
+        from(rootProject.file("native/out/arm64-v8a")) {
+            include("busybox", "magiskboot", "magiskinit", "magisk")
+            rename { if (it == "magisk") "libmagisk64.so" else "lib$it.so" }
+        }
+    }
+    into("x86_64") {
         from(rootProject.file("native/out/x86_64")) {
-            include("magisk")
+            include("busybox", "magiskboot", "magiskinit", "magisk")
             rename { if (it == "magisk") "libmagisk64.so" else "lib$it.so" }
         }
     }
     onlyIf {
-        if (inputs.sourceFiles.files.size != 10)
+        if (inputs.sourceFiles.files.size != 16)
             throw StopExecutionException("Please build binaries first! (./build.py binary)")
         true
     }
 }
 
-val createStubLibs by tasks.registering {
-    dependsOn(syncLibs)
-    doLast {
-        val arm64 = project.file("src/main/jniLibs/arm64-v8a/libstub.so")
-        arm64.parentFile.mkdirs()
-        arm64.createNewFile()
-        val x64 = project.file("src/main/jniLibs/x86_64/libstub.so")
-        x64.parentFile.mkdirs()
-        x64.createNewFile()
-    }
-}
-
 val syncAssets by tasks.registering(Sync::class) {
-    dependsOn(createStubLibs)
+    dependsOn(syncLibs)
     inputs.property("version", Config.version)
     inputs.property("versionCode", Config.versionCode)
     into("src/main/assets")
@@ -127,7 +117,8 @@ val syncAssets by tasks.registering(Sync::class) {
         filter {
             it.replace("#MAGISK_VERSION_STUB",
                 "MAGISK_VER='${Config.version}'\n" +
-                "MAGISK_VER_CODE=${Config.versionCode}")
+                "MAGISK_VER_CODE=${Config.versionCode}"
+            )
         }
         filter<FixCrLfFilter>("eol" to FixCrLfFilter.CrLf.newInstance("lf"))
     }
@@ -185,6 +176,8 @@ android.applicationVariants.all {
 dependencies {
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
     implementation(kotlin("stdlib"))
+    // Some dependencies request JDK 8 stdlib, specify manually here to prevent version mismatch
+    implementation(kotlin("stdlib-jdk8"))
     implementation(project(":app:shared"))
 
     implementation("com.github.topjohnwu:jtar:1.0.0")
@@ -201,40 +194,31 @@ dependencies {
     implementation("${bindingAdapter}:${vBAdapt}")
     implementation("${bindingAdapter}-recyclerview:${vBAdapt}")
 
-    val vMarkwon = "4.6.1"
+    val vMarkwon = "4.6.2"
     implementation("io.noties.markwon:core:${vMarkwon}")
     implementation("io.noties.markwon:html:${vMarkwon}")
     implementation("io.noties.markwon:image:${vMarkwon}")
     implementation("com.caverock:androidsvg:1.4")
 
-    val vLibsu = "3.1.1"
+    val vLibsu = "3.1.2"
     implementation("com.github.topjohnwu.libsu:core:${vLibsu}")
     implementation("com.github.topjohnwu.libsu:io:${vLibsu}")
-
-    val vKoin = "2.1.6"
-    implementation("org.koin:koin-core:${vKoin}")
-    implementation("org.koin:koin-android:${vKoin}")
-    implementation("org.koin:koin-androidx-viewmodel:${vKoin}")
 
     val vRetrofit = "2.9.0"
     implementation("com.squareup.retrofit2:retrofit:${vRetrofit}")
     implementation("com.squareup.retrofit2:converter-moshi:${vRetrofit}")
     implementation("com.squareup.retrofit2:converter-scalars:${vRetrofit}")
 
-    val vOkHttp = "3.12.12"
-    implementation("com.squareup.okhttp3:okhttp") {
-        version {
-            strictly(vOkHttp)
-        }
-    }
+    val vOkHttp = "4.9.1"
+    implementation("com.squareup.okhttp3:okhttp:${vOkHttp}")
     implementation("com.squareup.okhttp3:logging-interceptor:${vOkHttp}")
     implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:${vOkHttp}")
 
-    val vMoshi = "1.11.0"
+    val vMoshi = "1.12.0"
     implementation("com.squareup.moshi:moshi:${vMoshi}")
     kapt("com.squareup.moshi:moshi-kotlin-codegen:${vMoshi}")
 
-    val vRoom = "2.3.0-beta01"
+    val vRoom = "2.3.0"
     implementation("androidx.room:room-runtime:${vRoom}")
     implementation("androidx.room:room-ktx:${vRoom}")
     kapt("androidx.room:room-compiler:${vRoom}")
@@ -248,11 +232,10 @@ dependencies {
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("androidx.browser:browser:1.3.0")
     implementation("androidx.preference:preference:1.1.1")
-    implementation("androidx.recyclerview:recyclerview:1.1.0")
-    implementation("androidx.fragment:fragment-ktx:1.2.5")
+    implementation("androidx.recyclerview:recyclerview:1.2.0")
+    implementation("androidx.fragment:fragment-ktx:1.3.3")
     implementation("androidx.work:work-runtime-ktx:2.5.0")
-    implementation("androidx.transition:transition:1.4.0")
-    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.transition:transition:1.4.1")
     implementation("androidx.core:core-ktx:1.3.2")
     implementation("com.google.android.material:material:1.3.0")
 }

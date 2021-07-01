@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.topjohnwu.magisk">
 
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
     <application
         android:name=".core.App"
         android:extractNativeLibs="true"
@@ -13,6 +15,7 @@
         <!-- Splash -->
         <activity
             android:name=".core.SplashActivity"
+            android:exported="true"
             android:theme="@style/SplashTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -47,10 +50,10 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.intent.action.UID_REMOVED" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
 
                 <data android:scheme="package" />
             </intent-filter>
@@ -82,11 +85,6 @@
         <!-- We don't invalidate Room -->
         <service
             android:name="androidx.room.MultiInstanceInvalidationService"
-            tools:node="remove" />
-
-        <!-- We don't use Device Credentials -->
-        <activity
-            android:name="androidx.biometric.DeviceCredentialHandlerActivity"
             tools:node="remove" />
 
     </application>

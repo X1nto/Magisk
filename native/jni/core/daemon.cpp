@@ -146,88 +146,34 @@ shortcut:
     close(client);
 }
 
-static shared_ptr<FILE> log_file;
-
-atomic_flag file_backed = ATOMIC_FLAG_INIT;
-static char *log_buf;
-static size_t log_buf_len;
-
-void setup_logfile(bool reset) {
-    if (file_backed.test_and_set(memory_order_relaxed))
-        return;
-    if (reset)
-        rename(LOGFILE, LOGFILE ".bak");
-
-    int fd = xopen(LOGFILE, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) {
-        log_file.reset();
-        return;
+static int switch_cgroup(const char *cgroup, int pid) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%s/cgroup.procs", cgroup);
+    int fd = open(buf, O_WRONLY | O_APPEND | O_CLOEXEC);
+    if (fd == -1)
+        return -1;
+    snprintf(buf, sizeof(buf), "%d\n", pid);
+    if (xwrite(fd, buf, strlen(buf)) == -1) {
+        close(fd);
+        return -1;
     }
-
-    // Dump all logs in memory (if exists)
-    if (log_buf)
-        write(fd, log_buf, log_buf_len);
-
-    if (FILE *fp = fdopen(fd, "a")) {
-        setbuf(fp, nullptr);
-        log_file.reset(fp, &fclose);
-    }
+    close(fd);
+    return 0;
 }
 
-static int magisk_log(int prio, const char *fmt, va_list ap) {
-    va_list args;
-    va_copy(args, ap);
+static void magisk_logging();
+static void start_log_daemon();
 
-    // Log to logcat
-    __android_log_vprint(prio, "Magisk", fmt, ap);
-
-    auto local_log_file = log_file;
-    if (!local_log_file)
-        return 0;
-
-    char buf[4096];
-    timeval tv;
-    tm tm;
-    char type;
-    switch (prio) {
-    case ANDROID_LOG_DEBUG:
-        type = 'D';
-        break;
-    case ANDROID_LOG_INFO:
-        type = 'I';
-        break;
-    case ANDROID_LOG_WARN:
-        type = 'W';
-        break;
-    default:
-        type = 'E';
-        break;
-    }
-    gettimeofday(&tv, nullptr);
-    localtime_r(&tv.tv_sec, &tm);
-    size_t len = strftime(buf, sizeof(buf), "%m-%d %T", &tm);
-    int ms = tv.tv_usec / 1000;
-    len += sprintf(buf + len, ".%03d %*d %*d %c : ", ms, 5, getpid(), 5, gettid(), type);
-    strcpy(buf + len, fmt);
-    return vfprintf(local_log_file.get(), buf, args);
-}
-
-#define mlog(prio) [](auto fmt, auto ap){ return magisk_log(ANDROID_LOG_##prio, fmt, ap); }
-static void magisk_logging() {
-    auto in_mem_file = make_stream_fp<byte_stream>(log_buf, log_buf_len);
-    log_file.reset(in_mem_file.release(), [](FILE *) {
-        free(log_buf);
-        log_buf = nullptr;
-    });
-    log_cb.d = mlog(DEBUG);
-    log_cb.i = mlog(INFO);
-    log_cb.w = mlog(WARN);
-    log_cb.e = mlog(ERROR);
-    log_cb.ex = nop_ex;
-}
-
-static void daemon_entry(int ppid) {
+[[noreturn]] static void daemon_entry() {
     magisk_logging();
+
+    // Block all signals
+    sigset_t block_set;
+    sigfillset(&block_set);
+    pthread_sigmask(SIG_SETMASK, &block_set, nullptr);
+
+    // Change process name
+    set_nice_name("magiskd");
 
     int fd = xopen("/dev/null", O_WRONLY);
     xdup2(fd, STDOUT_FILENO);
@@ -242,17 +188,19 @@ static void daemon_entry(int ppid) {
     setsid();
     setcon("u:r:" SEPOL_PROC_DOMAIN ":s0");
 
+    start_log_daemon();
+
     LOGI(NAME_WITH_VER(Magisk) " daemon started\n");
 
-    // Make sure ppid is not in acct
-    char src[64], dest[64];
-    sprintf(src, "/acct/uid_0/pid_%d", ppid);
-    sprintf(dest, "/acct/uid_0/pid_%d", getpid());
-    rename(src, dest);
+    // Escape from cgroup
+    int pid = getpid();
+    if (switch_cgroup("/acct", pid) && switch_cgroup("/sys/fs/cgroup", pid))
+        LOGW("Can't switch cgroup\n");
 
     // Get self stat
-    xreadlink("/proc/self/exe", src, sizeof(src));
-    MAGISKTMP = dirname(src);
+    char buf[64];
+    xreadlink("/proc/self/exe", buf, sizeof(buf));
+    MAGISKTMP = dirname(buf);
     xstat("/proc/self/exe", &self_st);
 
     // Get API level
@@ -299,14 +247,6 @@ static void daemon_entry(int ppid) {
         exit(1);
     xlisten(fd, 10);
 
-    // Change process name
-    set_nice_name("magiskd");
-
-    // Block all signals
-    sigset_t block_set;
-    sigfillset(&block_set);
-    pthread_sigmask(SIG_SETMASK, &block_set, nullptr);
-
     // Loop forever to listen for requests
     for (;;) {
         int client = xaccept4(fd, nullptr, nullptr, SOCK_CLOEXEC);
@@ -315,24 +255,181 @@ static void daemon_entry(int ppid) {
 }
 
 int connect_daemon(bool create) {
-    struct sockaddr_un sun;
+    sockaddr_un sun;
     socklen_t len = setup_sockaddr(&sun, MAIN_SOCKET);
-    int fd = xsocket(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int fd = xsocket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (connect(fd, (struct sockaddr*) &sun, len)) {
         if (!create || getuid() != UID_ROOT || getgid() != UID_ROOT) {
             LOGE("No daemon is currently running!\n");
             exit(1);
         }
 
-        int ppid = getpid();
-        LOGD("client: launching new main daemon process\n");
         if (fork_dont_care() == 0) {
             close(fd);
-            daemon_entry(ppid);
+            daemon_entry();
         }
 
         while (connect(fd, (struct sockaddr*) &sun, len))
             usleep(10000);
     }
     return fd;
+}
+
+struct log_meta {
+    int prio;
+    int len;
+    int pid;
+    int tid;
+};
+
+static atomic<int> log_sockfd = -1;
+
+void setup_logfile(bool reset) {
+    if (log_sockfd < 0)
+        return;
+
+    msghdr msg{};
+    iovec iov{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+
+    log_meta meta = {
+        .prio = -1,
+        .len = reset
+    };
+
+    iov.iov_base = &meta;
+    iov.iov_len = sizeof(meta);
+    sendmsg(log_sockfd, &msg, MSG_NOSIGNAL);
+}
+
+static void logfile_writer(int sockfd) {
+    run_finally close_socket([=] {
+        // Close up all logging sockets when thread dies
+        close(sockfd);
+        close(log_sockfd.exchange(-1));
+    });
+
+    char *log_buf;
+    size_t buf_len;
+    stream *log_strm = new byte_stream(log_buf, buf_len);
+
+    msghdr msg{};
+    iovec iov{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+
+    log_meta meta{};
+    char buf[4096];
+
+    for (;;) {
+        // Read meta data
+        iov.iov_base = &meta;
+        iov.iov_len = sizeof(meta);
+        if (recvmsg(sockfd, &msg, 0) <= 0)
+            return;
+
+        if (meta.prio < 0 && buf_len >= 0) {
+            run_finally free_buf([&] {
+                free(log_buf);
+                log_buf = nullptr;
+                buf_len = -1;
+            });
+
+            if (meta.len)
+                rename(LOGFILE, LOGFILE ".bak");
+
+            int fd = open(LOGFILE, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+            if (fd < 0)
+                return;
+            if (log_buf)
+                write(fd, log_buf, buf_len);
+
+            delete log_strm;
+            log_strm = new fd_stream(fd);
+            continue;
+        }
+
+        timeval tv;
+        tm tm;
+        gettimeofday(&tv, nullptr);
+        localtime_r(&tv.tv_sec, &tm);
+
+        // Format detailed info
+        char type;
+        switch (meta.prio) {
+            case ANDROID_LOG_DEBUG:
+                type = 'D';
+                break;
+            case ANDROID_LOG_INFO:
+                type = 'I';
+                break;
+            case ANDROID_LOG_WARN:
+                type = 'W';
+                break;
+            default:
+                type = 'E';
+                break;
+        }
+        size_t off = strftime(buf, sizeof(buf), "%m-%d %T", &tm);
+        int ms = tv.tv_usec / 1000;
+        off += snprintf(buf + off, sizeof(buf) - off,
+                ".%03d %5d %5d %c : ", ms, meta.pid, meta.tid, type);
+
+        // Read log msg
+        iov.iov_base = buf + off;
+        iov.iov_len = meta.len;
+        if (recvmsg(sockfd, &msg, 0) <= 0)
+            return;
+        log_strm->write(buf, off + meta.len);
+    }
+}
+
+static int magisk_log(int prio, const char *fmt, va_list ap) {
+    char buf[4000];
+    int len = vsnprintf(buf, sizeof(buf), fmt, ap) + 1;
+
+    if (log_sockfd >= 0) {
+        log_meta meta = {
+            .prio = prio,
+            .len = len,
+            .pid = getpid(),
+            .tid = gettid()
+        };
+
+        msghdr msg{};
+        iovec iov[2];
+        msg.msg_iov = iov;
+        msg.msg_iovlen = 2;
+
+        iov[0].iov_base = &meta;
+        iov[0].iov_len = sizeof(meta);
+        iov[1].iov_base = buf;
+        iov[1].iov_len = len;
+
+        if (sendmsg(log_sockfd, &msg, MSG_NOSIGNAL) < 0) {
+            // Stop trying to write to file
+            close(log_sockfd.exchange(-1));
+        }
+    }
+    __android_log_write(prio, "Magisk", buf);
+
+    return len - 1;
+}
+
+static void start_log_daemon() {
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == 0) {
+        log_sockfd = fds[0];
+        new_daemon_thread([=] { logfile_writer(fds[1]); });
+    }
+}
+
+#define mlog(prio) [](auto fmt, auto ap){ return magisk_log(ANDROID_LOG_##prio, fmt, ap); }
+static void magisk_logging() {
+    log_cb.d = mlog(DEBUG);
+    log_cb.i = mlog(INFO);
+    log_cb.w = mlog(WARN);
+    log_cb.e = mlog(ERROR);
+    log_cb.ex = nop_ex;
 }

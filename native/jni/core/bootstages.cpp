@@ -140,12 +140,6 @@ static bool magisk_env() {
     xmkdir(SECURE_DIR "/post-fs-data.d", 0755);
     xmkdir(SECURE_DIR "/service.d", 0755);
 
-    // Disable/remove magiskhide, resetprop
-    if (SDK_INT < 19) {
-        unlink("/sbin/resetprop");
-        unlink("/sbin/magiskhide");
-    }
-
     if (access(DATABIN "/busybox", X_OK))
         return false;
 
@@ -289,7 +283,7 @@ void post_fs_data(int client) {
         } else {
             // If the folder is not automatically created by Android,
             // do NOT proceed further. Manual creation of the folder
-            // will cause bootloops on FBE devices.
+            // will have no encryption flag, which will cause bootloops on FBE devices.
             LOGE(SECURE_DIR " is not present, abort\n");
             goto early_abort;
         }

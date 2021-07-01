@@ -93,13 +93,15 @@ class HideProcessRvItem(
 
     override val layoutRes get() = R.layout.item_hide_process_md2
 
+    val displayName = if (process.isIsolated) "(isolated) ${process.name}" else process.name
+
     @get:Bindable
     var isHidden
         get() = process.isHidden
         set(value) = set(value, process.isHidden, { process.isHidden = it }, BR.hidden) {
             val arg = if (it) "add" else "rm"
             val (name, pkg) = process
-            Shell.su("magiskhide --$arg $pkg $name").submit()
+            Shell.su("magiskhide $arg $pkg \'$name\'").submit()
         }
 
     fun toggle() {
@@ -109,7 +111,10 @@ class HideProcessRvItem(
     val defaultSelection get() =
         process.isIsolated || process.isAppZygote || process.name == process.packageName
 
-    override fun contentSameAs(other: HideProcessRvItem) = process == other.process
-    override fun itemSameAs(other: HideProcessRvItem) = process.name == other.process.name
+    override fun contentSameAs(other: HideProcessRvItem) =
+        process.isHidden == other.process.isHidden
+
+    override fun itemSameAs(other: HideProcessRvItem) =
+        process.name == other.process.name && process.packageName == other.process.packageName
 
 }

@@ -14,7 +14,9 @@
         tools:ignore="GoogleAppIndexingWarning,MissingApplicationIcon,UnusedAttribute">
 
         <!-- Splash -->
-        <activity android:name="f.u7">
+        <activity
+            android:name="f.u7"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -48,10 +50,10 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.intent.action.UID_REMOVED" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
 
                 <data android:scheme="package" />
             </intent-filter>

@@ -3,7 +3,6 @@ package com.topjohnwu.magisk.ui.surequest
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Resources
-import android.os.Build
 import android.os.Bundle
 import android.view.Window
 import android.view.WindowManager
@@ -13,7 +12,7 @@ import com.topjohnwu.magisk.arch.BaseUIActivity
 import com.topjohnwu.magisk.core.su.SuCallbackHandler
 import com.topjohnwu.magisk.core.su.SuCallbackHandler.REQUEST
 import com.topjohnwu.magisk.databinding.ActivityRequestBinding
-import org.koin.androidx.viewmodel.ext.android.viewModel
+import com.topjohnwu.magisk.di.viewModel
 
 open class SuRequestActivity : BaseUIActivity<SuRequestViewModel, ActivityRequestBinding>() {
 
@@ -62,9 +61,6 @@ open class SuRequestActivity : BaseUIActivity<SuRequestViewModel, ActivityReques
     }
 
     private fun lockOrientation() {
-        requestedOrientation = if (Build.VERSION.SDK_INT < 18)
-            resources.configuration.orientation
-        else
-            ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
     }
 }

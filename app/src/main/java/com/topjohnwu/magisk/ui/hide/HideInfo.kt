@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PackageManager.*
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Drawable
+import android.os.Build.VERSION.SDK_INT
 import com.topjohnwu.magisk.core.utils.currentLocale
 import com.topjohnwu.magisk.ktx.getLabel
 import com.topjohnwu.magisk.ktx.isIsolated
@@ -59,7 +60,7 @@ class HideAppInfo(info: ApplicationInfo, pm: PackageManager, hideList: List<Cmdl
 
         val hidden = hideList.filter { it.packageName == packageName || it.packageName == ISOLATED_MAGIC }
         fun createProcess(name: String, pkg: String = packageName): HideProcessInfo {
-            return HideProcessInfo(name, pkg, hidden.any { it.process == name })
+            return HideProcessInfo(name, pkg, hidden.any { it.process == name && it.packageName == pkg })
         }
 
         var haveAppZygote = false
@@ -71,7 +72,8 @@ class HideAppInfo(info: ApplicationInfo, pm: PackageManager, hideList: List<Cmdl
                     // Using app zygote, don't need to track the process
                     null
                 } else {
-                    createProcess("${it.processName}:${it.name}", ISOLATED_MAGIC)
+                    val proc = if (SDK_INT >= 29) "${it.processName}:${it.name}" else it.processName
+                    createProcess(proc, ISOLATED_MAGIC)
                 }
             } else {
                 createProcess(it.processName)
@@ -84,7 +86,7 @@ class HideAppInfo(info: ApplicationInfo, pm: PackageManager, hideList: List<Cmdl
             receivers?.processes().orEmpty() +
             providers?.processes().orEmpty() +
             listOf(if (haveAppZygote) createProcess("${processName}_zygote") else null)
-        }.filterNotNull().distinctBy { it.name }.sortedBy { it.name }
+        }.filterNotNull().distinct().sortedBy { it.name }
     }
 
     companion object {
@@ -100,6 +102,6 @@ data class HideProcessInfo(
     val packageName: String,
     var isHidden: Boolean
 ) {
-    val isIsolated get() = name == ISOLATED_MAGIC
+    val isIsolated get() = packageName == ISOLATED_MAGIC
     val isAppZygote get() = name.endsWith("_zygote")
 }

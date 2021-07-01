@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <utility>
+#include <bitset>
 #include "format.hpp"
 
 /******************
@@ -40,6 +41,49 @@ struct blob_hdr {
     uint32_t version;       /* 0x00000001 */
 } __attribute__((packed));
 
+/**************
+ * AVB Headers
+ **************/
+
+#define AVB_FOOTER_MAGIC_LEN 4
+#define AVB_MAGIC_LEN 4
+#define AVB_RELEASE_STRING_SIZE 48
+
+// https://android.googlesource.com/platform/external/avb/+/refs/heads/android11-release/libavb/avb_footer.h
+struct AvbFooter {
+    uint8_t magic[AVB_FOOTER_MAGIC_LEN];
+    uint32_t version_major;
+    uint32_t version_minor;
+    uint64_t original_image_size;
+    uint64_t vbmeta_offset;
+    uint64_t vbmeta_size;
+    uint8_t reserved[28];
+} __attribute__((packed));
+
+// https://android.googlesource.com/platform/external/avb/+/refs/heads/android11-release/libavb/avb_vbmeta_image.h
+struct AvbVBMetaImageHeader {
+    uint8_t magic[AVB_MAGIC_LEN];
+    uint32_t required_libavb_version_major;
+    uint32_t required_libavb_version_minor;
+    uint64_t authentication_data_block_size;
+    uint64_t auxiliary_data_block_size;
+    uint32_t algorithm_type;
+    uint64_t hash_offset;
+    uint64_t hash_size;
+    uint64_t signature_offset;
+    uint64_t signature_size;
+    uint64_t public_key_offset;
+    uint64_t public_key_size;
+    uint64_t public_key_metadata_offset;
+    uint64_t public_key_metadata_size;
+    uint64_t descriptors_offset;
+    uint64_t descriptors_size;
+    uint64_t rollback_index;
+    uint32_t flags;
+    uint32_t rollback_index_location;
+    uint8_t release_string[AVB_RELEASE_STRING_SIZE];
+    uint8_t reserved[80];
+} __attribute__((packed));
 
 /*********************
  * Boot Image Headers
@@ -231,6 +275,7 @@ struct dyn_img_hdr {
     decl_val(cmdline, char *)
     decl_val(id, char *)
     decl_val(extra_cmdline, char *)
+    uint32_t kernel_dt_size = 0;
 
     // v1/v2 specific
     decl_var(recovery_dtbo_size, 32)
@@ -244,6 +289,7 @@ struct dyn_img_hdr {
 
     virtual size_t hdr_size() = 0;
     virtual size_t hdr_space() { return page_size(); }
+    virtual dyn_img_hdr *clone() = 0;
 
     const void *raw_hdr() const { return raw; }
     void print();
@@ -276,7 +322,12 @@ name(void *ptr) { \
     raw = xmalloc(sizeof(hdr)); \
     memcpy(raw, ptr, sizeof(hdr)); \
 } \
-size_t hdr_size() override { return sizeof(hdr); }
+size_t hdr_size() override { return sizeof(hdr); } \
+dyn_img_hdr *clone() override { \
+    auto p = new name(this->raw); \
+    p->kernel_dt_size = kernel_dt_size; \
+    return p; \
+};
 
 #define __impl_val(name, hdr_name) \
 decltype(std::declval<dyn_img_hdr>().name()) name() override { return hdr_name->name; }
@@ -351,7 +402,7 @@ struct dyn_img_v3 : public dyn_img_hdr {
     char *extra_cmdline() override { return &v3_hdr->cmdline[BOOT_ARGS_SIZE]; }
 
 private:
-    uint32_t page_sz;
+    uint32_t page_sz = 4096;
 };
 
 #undef impl_val
@@ -383,16 +434,20 @@ struct dyn_img_vnd_v3 : public dyn_img_hdr {
  * Full Boot Image
  ******************/
 
-#define MTK_KERNEL      (1 << 0)
-#define MTK_RAMDISK     (1 << 1)
-#define CHROMEOS_FLAG   (1 << 2)
-#define DHTB_FLAG       (1 << 3)
-#define SEANDROID_FLAG  (1 << 4)
-#define LG_BUMP_FLAG    (1 << 5)
-#define SHA256_FLAG     (1 << 6)
-#define BLOB_FLAG       (1 << 7)
-#define NOOKHD_FLAG     (1 << 8)
-#define ACCLAIM_FLAG    (1 << 9)
+enum {
+    MTK_KERNEL,
+    MTK_RAMDISK,
+    CHROMEOS_FLAG,
+    DHTB_FLAG,
+    SEANDROID_FLAG,
+    LG_BUMP_FLAG,
+    SHA256_FLAG,
+    BLOB_FLAG,
+    NOOKHD_FLAG,
+    ACCLAIM_FLAG,
+    AVB_FLAG,
+    BOOT_FLAGS_MAX
+};
 
 struct boot_img {
     // Memory map of the whole image
@@ -403,7 +458,7 @@ struct boot_img {
     dyn_img_hdr *hdr;
 
     // Flags to indicate the state of current boot image
-    uint16_t flags = 0;
+    std::bitset<BOOT_FLAGS_MAX> flags;
 
     // The format of kernel, ramdisk and extra
     format_t k_fmt = UNKNOWN;
@@ -420,11 +475,14 @@ struct boot_img {
 
     // Pointer to dtb that is embedded in kernel
     uint8_t *kernel_dtb;
-    uint32_t kernel_dt_size = 0;
 
     // Pointer to end of image
     uint8_t *tail;
     size_t tail_size = 0;
+
+    // AVB structs
+    AvbFooter *avb_footer;
+    AvbVBMetaImageHeader *avb_meta;
 
     // Pointers to blocks defined in header
     uint8_t *hdr_addr;

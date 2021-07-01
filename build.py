@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-import sys
-import os
-import subprocess
 import argparse
-import multiprocessing
-import zipfile
 import errno
-import shutil
 import lzma
-import platform
-import urllib.request
+import multiprocessing
+import os
 import os.path as op
+import platform
+import shutil
+import stat
+import subprocess
+import sys
+import urllib.request
+import zipfile
 from distutils.dir_util import copy_tree
 
 
@@ -39,6 +40,7 @@ is_ci = 'CI' in os.environ and os.environ['CI'] == 'true'
 
 if not is_ci and is_windows:
     import colorama
+
     colorama.init()
 
 # Environment checks
@@ -55,10 +57,9 @@ except FileNotFoundError:
     error('Please install JDK and make sure \'javac\' is available in PATH')
 
 cpu_count = multiprocessing.cpu_count()
-archs = ['armeabi-v7a', 'x86']
-arch64 = ['arm64-v8a', 'x86_64']
-support_targets = ['magisk', 'magiskinit', 'magiskboot', 'magiskpolicy', 'resetprop', 'busybox', 'test']
+archs = ['armeabi-v7a', 'x86', 'arm64-v8a', 'x86_64']
 default_targets = ['magisk', 'magiskinit', 'magiskboot', 'busybox']
+support_targets = default_targets + ['magiskpolicy', 'resetprop', 'test']
 
 ndk_root = op.join(os.environ['ANDROID_SDK_ROOT'], 'ndk')
 ndk_path = op.join(ndk_root, 'magisk')
@@ -96,9 +97,16 @@ def rm(file):
             raise
 
 
+def rm_on_error(func, path, _):
+    # Remove a read-only file on Windows will get "WindowsError: [Error 5] Access is denied"
+    # Clear the "read-only" and retry
+    os.chmod(path, stat.S_IWRITE)
+    os.unlink(path)
+
+
 def rm_rf(path):
     vprint(f'rm -rf {path}')
-    shutil.rmtree(path, ignore_errors=True)
+    shutil.rmtree(path, ignore_errors=True, onerror=rm_on_error)
 
 
 def mkdir(path, mode=0o755):
@@ -170,7 +178,7 @@ def load_config(args):
 
 
 def collect_binary():
-    for arch in archs + arch64:
+    for arch in archs:
         mkdir_p(op.join('native', 'out', arch))
         for bin in support_targets:
             source = op.join('native', 'libs', arch, bin)
@@ -188,7 +196,7 @@ def clean_elf():
                    '-o', elf_cleaner])
     args = [elf_cleaner]
     args.extend(op.join('native', 'out', arch, 'magisk')
-                for arch in archs + arch64)
+                for arch in archs)
     execv(args)
 
 
@@ -203,6 +211,7 @@ def find_build_tools():
     build_tools = op.join(build_tools_root, ls[-1])
     return build_tools
 
+
 # Unused but keep this code
 def sign_zip(unsigned):
     if 'keyStore' not in config:
@@ -212,18 +221,18 @@ def sign_zip(unsigned):
     apksigner = op.join(find_build_tools(), 'apksigner' + ('.bat' if is_windows else ''))
 
     exec_args = [apksigner, 'sign',
-                '--ks', config['keyStore'],
-                '--ks-pass', f'pass:{config["keyStorePass"]}',
-                '--ks-key-alias', config['keyAlias'],
-                '--key-pass', f'pass:{config["keyPass"]}',
-                '--v1-signer-name', 'CERT',
-                '--v4-signing-enabled', 'false']
+                 '--ks', config['keyStore'],
+                 '--ks-pass', f'pass:{config["keyStorePass"]}',
+                 '--ks-key-alias', config['keyAlias'],
+                 '--key-pass', f'pass:{config["keyPass"]}',
+                 '--v1-signer-name', 'CERT',
+                 '--v4-signing-enabled', 'false']
 
     if unsigned.endswith('.zip'):
         msg = '* Signing zip'
         exec_args.extend(['--min-sdk-version', '17',
-                         '--v2-signing-enabled', 'false',
-                         '--v3-signing-enabled', 'false'])
+                          '--v2-signing-enabled', 'false',
+                          '--v3-signing-enabled', 'false'])
 
     exec_args.append(unsigned)
 
@@ -256,6 +265,7 @@ def dump_bin_headers():
     stub = op.join(config['outdir'], 'stub-release.apk')
     if not op.exists(stub):
         error('Build stub APK before building "magiskinit"')
+    mkdir_p(op.join('native', 'out'))
     with open(op.join('native', 'out', 'binaries.h'), 'w') as out:
         with open(stub, 'rb') as src:
             binary_dump(src, out, 'manager_xz')
@@ -296,15 +306,13 @@ def build_binary(args):
     if not args.release:
         base_flags += ' MAGISK_DEBUG=1'
 
+    flag = ''
+
     if 'magisk' in args.target:
-        run_ndk_build('B_MAGISK=1 B_64BIT=1')
-        clean_elf()
+        flag += ' B_MAGISK=1'
 
     if 'test' in args.target:
-        run_ndk_build('B_TEST=1 B_64BIT=1')
-
-    # 32-bit only targets can be built in one command
-    flag = ''
+        flag += ' B_TEST=1'
 
     if 'magiskinit' in args.target:
         dump_bin_headers()
@@ -319,11 +327,14 @@ def build_binary(args):
     if 'magiskboot' in args.target:
         flag += ' B_BOOT=1'
 
-    if 'busybox' in args.target:
-        flag += ' B_BB=1'
-
     if flag:
         run_ndk_build(flag)
+
+    if 'magisk' in args.target:
+        clean_elf()
+
+    if 'busybox' in args.target:
+        run_ndk_build('B_BB=1')
 
 
 def build_apk(args, module):
@@ -335,27 +346,26 @@ def build_apk(args, module):
         error(f'Build {module} failed!')
 
     build_type = build_type.lower()
-    apk = f'{module}-{build_type}.apk'
 
+    apk = f'{module}-{build_type}.apk'
     source = op.join(module, 'build', 'outputs', 'apk', build_type, apk)
     target = op.join(config['outdir'], apk)
     mv(source, target)
     header('Output: ' + target)
-    return target
 
 
 def build_app(args):
-    header('* Building Magisk Manager')
+    header('* Building the Magisk app')
     build_apk(args, 'app')
 
 
 def build_stub(args):
-    header('* Building Magisk Manager stub')
+    header('* Building stub APK')
     build_apk(args, 'stub')
 
 
 def build_snet(args):
-    if not op.exists(op.join('snet', 'src', 'main', 'java', 'com', 'topjohnwu', 'snet')):
+    if not op.exists(op.join('stub', 'src', 'main', 'java', 'com', 'topjohnwu', 'snet')):
         error('snet sources have to be bind mounted on top of the stub folder')
     header('* Building snet extension')
     proc = execv([gradlew, 'stub:assembleRelease'])
@@ -405,34 +415,33 @@ def setup_ndk(args):
     rm_rf(ndk_path)
     with zipfile.ZipFile(ndk_zip, 'r') as zf:
         for info in zf.infolist():
+            print(f'Extracting {info.filename}')
+            if info.external_attr == 2716663808:  # symlink
+                src = zf.read(info).decode("utf-8")
+                dest = op.join(ndk_root, info.filename)
+                os.symlink(src, dest)
+                continue
             extracted_path = zf.extract(info, ndk_root)
-            vprint(f'Extracting {info.filename}')
             if info.create_system == 3:  # ZIP_UNIX_SYSTEM = 3
                 unix_attributes = info.external_attr >> 16
             if unix_attributes:
                 os.chmod(extracted_path, unix_attributes)
     mv(op.join(ndk_root, f'android-ndk-r{ndk_ver}'), ndk_path)
 
-    header('* Removing unnecessary files')
-    for dirname, subdirs, _ in os.walk(op.join(ndk_path, 'platforms')):
-        for plats in subdirs:
-            pp = op.join(dirname, plats)
-            rm_rf(pp)
-            mkdir(pp)
-        subdirs.clear()
-    rm_rf(op.join(ndk_path, 'sysroot'))
-
-    header('* Replacing API-16 static libs')
-    for target in ['arm-linux-androideabi', 'i686-linux-android']:
-        arch = target.split('-')[0]
-        lib_dir = op.join(
-            ndk_path, 'toolchains', 'llvm', 'prebuilt', f'{os_name}-x86_64',
-            'sysroot', 'usr', 'lib', f'{target}', '16')
-        src_dir = op.join('tools', 'ndk-bins', arch)
-        # Remove stupid macOS crap
-        rm(op.join(src_dir, '.DS_Store'))
-        for path in copy_tree(src_dir, lib_dir):
-            vprint(f'Replaced {path}')
+    header('* Patching static libs')
+    for api in ['16', '21']:
+        for target in ['aarch64-linux-android', 'arm-linux-androideabi',
+                       'i686-linux-android', 'x86_64-linux-android']:
+            arch = target.split('-')[0]
+            lib_dir = op.join(
+                ndk_path, 'toolchains', 'llvm', 'prebuilt', f'{os_name}-x86_64',
+                'sysroot', 'usr', 'lib', f'{target}', api)
+            if not op.exists(lib_dir):
+                continue
+            src_dir = op.join('tools', 'ndk-bins', api, arch)
+            rm(op.join(src_dir, '.DS_Store'))
+            for path in copy_tree(src_dir, lib_dir):
+                vprint(f'Replaced {path}')
 
 
 def build_all(args):
@@ -462,11 +471,11 @@ binary_parser.add_argument(
     or empty for defaults ({', '.join(default_targets)})")
 binary_parser.set_defaults(func=build_binary)
 
-app_parser = subparsers.add_parser('app', help='build Magisk Manager')
+app_parser = subparsers.add_parser('app', help='build the Magisk app')
 app_parser.set_defaults(func=build_app)
 
 stub_parser = subparsers.add_parser(
-    'stub', help='build stub Magisk Manager')
+    'stub', help='build stub APK')
 stub_parser.set_defaults(func=build_stub)
 
 # Need to bind mount snet sources on top of stub folder

@@ -1,6 +1,5 @@
 package com.topjohnwu.magisk.ui.flash
 
-import android.net.Uri
 import android.view.MenuItem
 import androidx.databinding.Bindable
 import androidx.lifecycle.LiveData
@@ -27,7 +26,7 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-class FlashViewModel(args: FlashFragmentArgs) : BaseViewModel() {
+class FlashViewModel : BaseViewModel() {
 
     @get:Bindable
     var showReboot = Shell.rootAccess()
@@ -39,6 +38,7 @@ class FlashViewModel(args: FlashFragmentArgs) : BaseViewModel() {
     val adapter = RvBindingAdapter<ConsoleItem>()
     val items = diffListOf<ConsoleItem>()
     val itemBinding = itemBindingOf<ConsoleItem>()
+    lateinit var args: FlashFragmentArgs
 
     private val logItems = mutableListOf<String>().synchronized()
     private val outItems = object : CallbackList<String>() {
@@ -49,14 +49,11 @@ class FlashViewModel(args: FlashFragmentArgs) : BaseViewModel() {
         }
     }
 
-    init {
+    fun startFlashing() {
         val (action, uri, id) = args
         if (id != -1)
             Notifications.mgr.cancel(id)
-        startFlashing(action, uri)
-    }
 
-    private fun startFlashing(action: String, uri: Uri?) {
         viewModelScope.launch {
             val result = when (action) {
                 Const.Value.FLASH_ZIP -> {

@@ -92,29 +92,47 @@ static void kill_process(const char *name, bool multi = false,
         bool (*filter)(int, const char *) = proc_name_match<&str_eql>) {
     crawl_procfs([=](int pid) -> bool {
         if (filter(pid, name)) {
-            kill(pid, SIGTERM);
+            kill(pid, SIGKILL);
             return multi;
         }
         return true;
     });
 }
 
-static bool validate(const char *s) {
-    if (strcmp(s, ISOLATED_MAGIC) == 0)
-        return true;
-    bool dot = false;
-    for (char c; (c = *s); ++s) {
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '_' || c == ':') {
-            continue;
+static bool validate(const char *pkg, const char *proc) {
+    bool pkg_valid = false;
+    bool proc_valid = true;
+
+    if (str_eql(pkg, ISOLATED_MAGIC)) {
+        pkg_valid = true;
+        for (char c; (c = *proc); ++proc) {
+            if (isalnum(c) || c == '_' || c == '.')
+                continue;
+            if (c == ':')
+                break;
+            proc_valid = false;
+            break;
         }
-        if (c == '.') {
-            dot = true;
-            continue;
+    } else {
+        for (char c; (c = *pkg); ++pkg) {
+            if (isalnum(c) || c == '_')
+                continue;
+            if (c == '.') {
+                pkg_valid = true;
+                continue;
+            }
+            pkg_valid = false;
+            break;
         }
-        return false;
+
+        for (char c; (c = *proc); ++proc) {
+            if (isalnum(c) || c == '_' || c == ':' || c == '.')
+                continue;
+            proc_valid = false;
+            break;
+        }
     }
-    return dot;
+    return pkg_valid && proc_valid;
 }
 
 static void add_hide_set(const char *pkg, const char *proc) {
@@ -132,7 +150,7 @@ static int add_list(const char *pkg, const char *proc) {
     if (proc[0] == '\0')
         proc = pkg;
 
-    if (!validate(pkg) || !validate(proc))
+    if (!validate(pkg, proc))
         return HIDE_INVALID_PKG;
 
     for (auto &hide : hide_set)
@@ -211,7 +229,6 @@ static bool str_ends_safe(string_view s, string_view ss) {
 
 #define SNET_PROC    "com.google.android.gms.unstable"
 #define GMS_PKG      "com.google.android.gms"
-#define MICROG_PKG   "org.microg.gms.droidguard"
 
 static bool init_list() {
     LOGD("hide: initialize\n");
@@ -231,7 +248,6 @@ static bool init_list() {
 
     // Add SafetyNet by default
     add_hide_set(GMS_PKG, SNET_PROC);
-    add_hide_set(MICROG_PKG, SNET_PROC);
 
     // We also need to hide the default GMS process if MAGISKTMP != /sbin
     // The snet process communicates with the main process and get additional info
@@ -263,9 +279,6 @@ static void update_hide_config() {
 
 int launch_magiskhide(bool late_props) {
     mutex_guard lock(hide_state_lock);
-
-    if (SDK_INT < 19)
-        return DAEMON_ERROR;
 
     if (hide_state)
         return HIDE_IS_ENABLED;
@@ -325,7 +338,7 @@ void auto_start_magiskhide(bool late_props) {
         pthread_kill(monitor_thread, SIGALRM);
 #endif
         hide_late_sensitive_props();
-    } else if (SDK_INT >= 19) {
+    } else {
         db_settings dbs;
         get_db_settings(dbs, HIDE_CONFIG);
         if (dbs[HIDE_CONFIG])
@@ -333,7 +346,7 @@ void auto_start_magiskhide(bool late_props) {
     }
 }
 
-bool is_hide_target(int uid, string_view process) {
+bool is_hide_target(int uid, string_view process, int max_len) {
     mutex_guard lock(hide_state_lock);
 
     if (uid % 100000 >= 90000) {
@@ -343,6 +356,8 @@ bool is_hide_target(int uid, string_view process) {
             return false;
 
         for (auto &s : it->second) {
+            if (s.length() > max_len && process.length() > max_len && str_starts(s, process))
+                return true;
             if (str_starts(process, s))
                 return true;
         }
@@ -352,6 +367,8 @@ bool is_hide_target(int uid, string_view process) {
             return false;
 
         for (auto &s : it->second) {
+            if (s.length() > max_len && process.length() > max_len && str_starts(s, process))
+                return true;
             if (s == process)
                 return true;
         }
